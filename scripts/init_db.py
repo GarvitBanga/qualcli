@@ -1,6 +1,6 @@
-from backend.database import init_db
-from backend.models.job import Base, Job
-from backend.database import engine
+from backend.database import init_db, engine
+from backend.models.job import Base  # Get Base from one of the models
+from backend.models import Job, Device  # Import all models for foreign key resolution
 
 def main():
     print("Creating database tables...")

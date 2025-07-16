@@ -9,7 +9,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from backend.database import SessionLocal, init_db
-from backend.models.device import Device
+from backend.models import Device, Job  # Import all models for consistency
 import logging
 
 # Configure logging
