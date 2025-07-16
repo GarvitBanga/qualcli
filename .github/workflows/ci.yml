@@ -109,14 +109,29 @@ jobs:
           qgjob submit --org-id=qualgent --app-version-id=xyz123 --test=tests/onboarding/login.spec.js --priority=3 --target=emulator > job_output.txt
           cat job_output.txt
 
+      - name: Extract job ID
+        run: |
+          # Extract job ID using multiple methods to handle Rich formatting
+          JOB_ID=$(grep -oP "Job ID:[^0-9]*\K[0-9]+" job_output.txt || grep -o "Job ID: [0-9]*" job_output.txt | grep -o "[0-9]*" || grep -oE "[0-9]+" job_output.txt | head -1)
+          echo "Extracted Job ID: $JOB_ID"
+          echo "JOB_ID=$JOB_ID" >> $GITHUB_ENV
+
       - name: Poll for job completion
         run: |
-          JOB_ID=$(grep "Job ID:" job_output.txt | awk '{print $NF}')
           echo "Polling job $JOB_ID for completion..."
           
           for i in {1..60}; do
-            qgjob status job --job-id=$JOB_ID > status_output.txt
-            STATUS=$(grep "Status:" status_output.txt | awk '{print $NF}')
+            qgjob status job --job-id=$JOB_ID > status_output.txt 2>&1
+            cat status_output.txt
+            
+            # Check if status command succeeded
+            if ! qgjob status job --job-id=$JOB_ID >/dev/null 2>&1; then
+              echo "Error getting job status, trying again..."
+              sleep 5
+              continue
+            fi
+            
+            STATUS=$(grep -o "Status: [a-zA-Z]*" status_output.txt | cut -d' ' -f2 || echo "unknown")
             echo "Job status: $STATUS (check $i/60)"
             
             if [[ "$STATUS" == "completed" ]]; then

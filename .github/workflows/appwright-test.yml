@@ -104,16 +104,25 @@ jobs:
       id: submit_jobs
       run: |
         # Submit high priority test
-        JOB1=$(qgjob submit --org-id=qualgent --app-version-id=ci-test-v1.0 --test=tests/example.spec.js --priority=4 --target=emulator | grep -o 'Job ID: [0-9]*' | grep -o '[0-9]*')
+        qgjob submit --org-id=qualgent --app-version-id=ci-test-v1.0 --test=tests/example.spec.js --priority=4 --target=emulator > job1_output.txt
+        cat job1_output.txt
+        JOB1=$(grep -oP "Job ID:[^0-9]*\K[0-9]+" job1_output.txt || grep -o "Job ID: [0-9]*" job1_output.txt | grep -o "[0-9]*" || grep -oE "[0-9]+" job1_output.txt | head -1)
         echo "job1_id=$JOB1" >> $GITHUB_OUTPUT
+        echo "Submitted Job 1: $JOB1"
         
-        # Submit normal priority test
-        JOB2=$(qgjob submit --org-id=qualgent --app-version-id=ci-test-v1.0 --test=tests/language.spec.js --priority=2 --target=emulator | grep -o 'Job ID: [0-9]*' | grep -o '[0-9]*')
+        # Submit normal priority test  
+        qgjob submit --org-id=qualgent --app-version-id=ci-test-v1.0 --test=tests/language.spec.js --priority=2 --target=emulator > job2_output.txt
+        cat job2_output.txt
+        JOB2=$(grep -oP "Job ID:[^0-9]*\K[0-9]+" job2_output.txt || grep -o "Job ID: [0-9]*" job2_output.txt | grep -o "[0-9]*" || grep -oE "[0-9]+" job2_output.txt | head -1)
         echo "job2_id=$JOB2" >> $GITHUB_OUTPUT
+        echo "Submitted Job 2: $JOB2"
         
         # Submit low priority test
-        JOB3=$(qgjob submit --org-id=qualgent --app-version-id=ci-test-v1.1 --test=tests/example.spec.js --priority=1 --target=emulator | grep -o 'Job ID: [0-9]*' | grep -o '[0-9]*')
+        qgjob submit --org-id=qualgent --app-version-id=ci-test-v1.1 --test=tests/example.spec.js --priority=1 --target=emulator > job3_output.txt
+        cat job3_output.txt
+        JOB3=$(grep -oP "Job ID:[^0-9]*\K[0-9]+" job3_output.txt || grep -o "Job ID: [0-9]*" job3_output.txt | grep -o "[0-9]*" || grep -oE "[0-9]+" job3_output.txt | head -1)
         echo "job3_id=$JOB3" >> $GITHUB_OUTPUT
+        echo "Submitted Job 3: $JOB3"
         
         echo "Submitted jobs: $JOB1, $JOB2, $JOB3"
     
@@ -127,9 +136,9 @@ jobs:
           qgjob status job --job-id=${{ steps.submit_jobs.outputs.job3_id }} --verbose
           
           # Check if all jobs are completed or failed
-          STATUS1=$(qgjob status job --job-id=${{ steps.submit_jobs.outputs.job1_id }} | grep -o 'Status: [a-z]*' | cut -d' ' -f2)
-          STATUS2=$(qgjob status job --job-id=${{ steps.submit_jobs.outputs.job2_id }} | grep -o 'Status: [a-z]*' | cut -d' ' -f2)
-          STATUS3=$(qgjob status job --job-id=${{ steps.submit_jobs.outputs.job3_id }} | grep -o 'Status: [a-z]*' | cut -d' ' -f2)
+          STATUS1=$(qgjob status job --job-id=${{ steps.submit_jobs.outputs.job1_id }} 2>/dev/null | grep -o "Status: [a-zA-Z]*" | cut -d' ' -f2 || echo "unknown")
+          STATUS2=$(qgjob status job --job-id=${{ steps.submit_jobs.outputs.job2_id }} 2>/dev/null | grep -o "Status: [a-zA-Z]*" | cut -d' ' -f2 || echo "unknown")
+          STATUS3=$(qgjob status job --job-id=${{ steps.submit_jobs.outputs.job3_id }} 2>/dev/null | grep -o "Status: [a-zA-Z]*" | cut -d' ' -f2 || echo "unknown")
           
           echo "Current statuses: $STATUS1, $STATUS2, $STATUS3"
           
@@ -152,9 +161,9 @@ jobs:
         qgjob status job --job-id=${{ steps.submit_jobs.outputs.job3_id }} --verbose
         
         # Get final statuses
-        STATUS1=$(qgjob status job --job-id=${{ steps.submit_jobs.outputs.job1_id }} | grep -o 'Status: [a-z]*' | cut -d' ' -f2)
-        STATUS2=$(qgjob status job --job-id=${{ steps.submit_jobs.outputs.job2_id }} | grep -o 'Status: [a-z]*' | cut -d' ' -f2)
-        STATUS3=$(qgjob status job --job-id=${{ steps.submit_jobs.outputs.job3_id }} | grep -o 'Status: [a-z]*' | cut -d' ' -f2)
+        STATUS1=$(qgjob status job --job-id=${{ steps.submit_jobs.outputs.job1_id }} 2>/dev/null | grep -o "Status: [a-zA-Z]*" | cut -d' ' -f2 || echo "unknown")
+        STATUS2=$(qgjob status job --job-id=${{ steps.submit_jobs.outputs.job2_id }} 2>/dev/null | grep -o "Status: [a-zA-Z]*" | cut -d' ' -f2 || echo "unknown")
+        STATUS3=$(qgjob status job --job-id=${{ steps.submit_jobs.outputs.job3_id }} 2>/dev/null | grep -o "Status: [a-zA-Z]*" | cut -d' ' -f2 || echo "unknown")
         
         echo "Final statuses: Job1=$STATUS1, Job2=$STATUS2, Job3=$STATUS3"
         
