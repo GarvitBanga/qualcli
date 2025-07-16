@@ -1,0 +1,151 @@
+name: AppWright Test
+on: [push, pull_request]
+
+jobs:
+  run-tests:
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:13
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: qualcli
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5433:5432
+      
+      redis:
+        image: redis:7
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install -e .
+    
+    - name: Set up environment variables
+      run: |
+        echo "DATABASE_URL=postgresql://postgres:postgres@localhost:5433/qualcli" >> $GITHUB_ENV
+        echo "API_URL=http://localhost:8002" >> $GITHUB_ENV
+    
+    - name: Initialize database
+      run: |
+        python scripts/init_db.py
+        python scripts/init_devices.py
+    
+    - name: Start backend service
+      run: |
+        uvicorn backend.main:app --host 0.0.0.0 --port 8002 &
+        sleep 10  # Wait for service to start
+    
+    - name: Start Celery worker
+      run: |
+        cd backend && celery -A queue.celery_app worker --loglevel=info --concurrency=2 &
+        sleep 5  # Wait for worker to start
+    
+    - name: Verify services are running
+      run: |
+        curl -f http://localhost:8002/health || exit 1
+        qgjob devices list || exit 1
+    
+    - name: Submit test jobs
+      id: submit_jobs
+      run: |
+        # Submit high priority test
+        JOB1=$(qgjob submit --org-id=qualgent --app-version-id=ci-test-v1.0 --test=tests/example.spec.js --priority=4 --target=emulator | grep -o 'Job ID: [0-9]*' | grep -o '[0-9]*')
+        echo "job1_id=$JOB1" >> $GITHUB_OUTPUT
+        
+        # Submit normal priority test
+        JOB2=$(qgjob submit --org-id=qualgent --app-version-id=ci-test-v1.0 --test=tests/language.spec.js --priority=2 --target=emulator | grep -o 'Job ID: [0-9]*' | grep -o '[0-9]*')
+        echo "job2_id=$JOB2" >> $GITHUB_OUTPUT
+        
+        # Submit low priority test
+        JOB3=$(qgjob submit --org-id=qualgent --app-version-id=ci-test-v1.1 --test=tests/example.spec.js --priority=1 --target=emulator | grep -o 'Job ID: [0-9]*' | grep -o '[0-9]*')
+        echo "job3_id=$JOB3" >> $GITHUB_OUTPUT
+        
+        echo "Submitted jobs: $JOB1, $JOB2, $JOB3"
+    
+    - name: Monitor job progress
+      run: |
+        echo "Monitoring job progress..."
+        for i in {1..60}; do
+          echo "=== Check $i/60 ==="
+          qgjob status job --job-id=${{ steps.submit_jobs.outputs.job1_id }} --verbose
+          qgjob status job --job-id=${{ steps.submit_jobs.outputs.job2_id }} --verbose
+          qgjob status job --job-id=${{ steps.submit_jobs.outputs.job3_id }} --verbose
+          
+          # Check if all jobs are completed or failed
+          STATUS1=$(qgjob status job --job-id=${{ steps.submit_jobs.outputs.job1_id }} | grep -o 'Status: [a-z]*' | cut -d' ' -f2)
+          STATUS2=$(qgjob status job --job-id=${{ steps.submit_jobs.outputs.job2_id }} | grep -o 'Status: [a-z]*' | cut -d' ' -f2)
+          STATUS3=$(qgjob status job --job-id=${{ steps.submit_jobs.outputs.job3_id }} | grep -o 'Status: [a-z]*' | cut -d' ' -f2)
+          
+          echo "Current statuses: $STATUS1, $STATUS2, $STATUS3"
+          
+          if [[ "$STATUS1" == "completed" || "$STATUS1" == "failed" ]] && \
+             [[ "$STATUS2" == "completed" || "$STATUS2" == "failed" ]] && \
+             [[ "$STATUS3" == "completed" || "$STATUS3" == "failed" ]]; then
+            echo "All jobs finished processing"
+            break
+          fi
+          
+          echo "Jobs still processing, waiting 10 seconds..."
+          sleep 10
+        done
+    
+    - name: Check final job results
+      run: |
+        echo "=== Final Job Results ==="
+        qgjob status job --job-id=${{ steps.submit_jobs.outputs.job1_id }} --verbose
+        qgjob status job --job-id=${{ steps.submit_jobs.outputs.job2_id }} --verbose  
+        qgjob status job --job-id=${{ steps.submit_jobs.outputs.job3_id }} --verbose
+        
+        # Get final statuses
+        STATUS1=$(qgjob status job --job-id=${{ steps.submit_jobs.outputs.job1_id }} | grep -o 'Status: [a-z]*' | cut -d' ' -f2)
+        STATUS2=$(qgjob status job --job-id=${{ steps.submit_jobs.outputs.job2_id }} | grep -o 'Status: [a-z]*' | cut -d' ' -f2)
+        STATUS3=$(qgjob status job --job-id=${{ steps.submit_jobs.outputs.job3_id }} | grep -o 'Status: [a-z]*' | cut -d' ' -f2)
+        
+        echo "Final statuses: Job1=$STATUS1, Job2=$STATUS2, Job3=$STATUS3"
+        
+        # Fail the build if any test failed
+        if [[ "$STATUS1" == "failed" || "$STATUS2" == "failed" || "$STATUS3" == "failed" ]]; then
+          echo "❌ One or more tests failed - failing the build"
+          exit 1
+        else
+          echo "✅ All tests passed successfully"
+        fi
+    
+    - name: Show queue and device status
+      if: always()  # Run even if previous steps failed
+      run: |
+        echo "=== Final System Status ==="
+        qgjob queue status
+        qgjob devices list
+        qgjob jobs list --limit=10
+    
+    - name: Show logs on failure
+      if: failure()
+      run: |
+        echo "=== Backend Logs ==="
+        cat app.log || echo "No app.log found"
+        echo "=== Celery Logs ==="
+        cat celery_tasks.log || echo "No celery_tasks.log found" 

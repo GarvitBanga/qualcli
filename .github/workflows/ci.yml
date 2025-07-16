@@ -1,0 +1,131 @@
+name: AppWright Test Job System
+
+on: [push]
+
+jobs:
+  test-job-system:
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis
+        ports:
+          - 6379:6379
+      postgres:
+        image: postgres:latest
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: qualcli
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install CLI package
+        run: |
+          pip install -e .
+
+      - name: Create test file
+        run: |
+          mkdir -p tests/onboarding
+          echo 'console.log("Sample test");' > tests/onboarding/login.spec.js
+
+      - name: Set environment variables
+        run: |
+          echo "DATABASE_URL=postgresql://postgres:postgres@localhost:5433/qualcli" >> $GITHUB_ENV
+          echo "API_URL=http://localhost:8002" >> $GITHUB_ENV
+
+      - name: Wait for services to be ready
+        run: |
+          # Wait for PostgreSQL
+          until pg_isready -h localhost -p 5433 -U postgres; do
+            echo "Waiting for PostgreSQL..."
+            sleep 2
+          done
+          # Wait for Redis
+          until redis-cli -p 6379 ping; do
+            echo "Waiting for Redis..."
+            sleep 2
+          done
+
+      - name: Start backend server
+        run: |
+          nohup uvicorn backend.main:app --host 0.0.0.0 --port 8002 > server.log 2>&1 &
+          sleep 10  # Wait for server to start
+
+      - name: Verify backend is running
+        run: |
+          # Wait for backend to respond
+          for i in {1..30}; do
+            if curl -f http://localhost:8002/docs >/dev/null 2>&1; then
+              echo "Backend is responding"
+              break
+            fi
+            echo "Waiting for backend... ($i/30)"
+            sleep 2
+          done
+
+      - name: Start Celery worker
+        run: |
+          nohup celery -A backend.queue.celery_app worker --loglevel=INFO > celery.log 2>&1 &
+          sleep 5  # Wait for worker to start
+
+      - name: Submit test job
+        run: |
+          qgjob submit --org-id=qualgent --app-version-id=xyz123 --test=tests/onboarding/login.spec.js --priority=3 --target=emulator > job_output.txt
+          cat job_output.txt
+
+      - name: Poll for job completion
+        run: |
+          JOB_ID=$(grep "Job ID:" job_output.txt | awk '{print $NF}')
+          echo "Polling job $JOB_ID for completion..."
+          
+          for i in {1..60}; do
+            qgjob status --job-id=$JOB_ID > status_output.txt
+            STATUS=$(grep "Status:" status_output.txt | awk '{print $NF}')
+            echo "Job status: $STATUS (check $i/60)"
+            
+            if [[ "$STATUS" == "completed" ]]; then
+              echo "Job completed successfully!"
+              cat status_output.txt
+              exit 0
+            elif [[ "$STATUS" == "failed" ]]; then
+              echo "Job failed!"
+              cat status_output.txt
+              exit 1
+            fi
+            
+            sleep 5
+          done
+          
+          echo "Job did not complete within timeout"
+          cat status_output.txt
+          exit 1
+
+      - name: Print logs on failure
+        if: failure()
+        run: |
+          echo "=== Server Log ==="
+          cat server.log
+          echo "=== Celery Log ==="
+          cat celery.log
+          echo "=== Job Output ==="
+          cat job_output.txt
+          echo "=== Status Output ==="
+          cat status_output.txt 

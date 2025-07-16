@@ -1,0 +1,12 @@
+{
+  "name": "qualcli",
+  "version": "1.0.0",
+  "description": "CLI tool and GitHub Actions integration to queue, group, and deploy tests across devices",
+  "main": "index.js",
+  "scripts": {
+    "test": "appwright test"
+  },
+  "dependencies": {
+    "appwright": "^0.1.45"
+  }
+} 
