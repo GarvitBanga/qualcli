@@ -82,8 +82,20 @@ jobs:
     
     - name: Start Celery worker
       run: |
-        cd backend && celery -A queue.celery_app worker --loglevel=info --concurrency=2 &
-        sleep 5  # Wait for worker to start
+        nohup celery -A backend.queue.celery_app worker --loglevel=info --concurrency=2 > celery.log 2>&1 &
+        sleep 10  # Wait for worker to start and connect
+
+    - name: Verify Celery worker is running
+      run: |
+        # Check if Celery worker process is running
+        ps aux | grep celery || echo "No Celery process found"
+        
+        # Check Celery status
+        celery -A backend.queue.celery_app status || echo "Celery status check failed"
+        
+        # Show recent Celery logs
+        echo "=== Recent Celery Logs ==="
+        tail -20 celery.log || echo "No celery.log found yet"
     
     - name: Verify services are running
       run: |
@@ -97,8 +109,18 @@ jobs:
           sleep 3
         done
         
+        # Test Redis connectivity
+        echo "=== Testing Redis Connection ==="
+        redis-cli -h localhost -p 6379 ping || exit 1
+        
+        # Check queue status via API
+        echo "=== Checking Queue Status ==="
+        curl -f http://localhost:8002/queues/status || echo "Queue status endpoint not available"
+        
         # Test CLI commands
+        echo "=== Testing CLI Commands ==="
         qgjob devices list || exit 1
+        qgjob queue status || echo "Queue status command failed"
     
     - name: Submit test jobs
       id: submit_jobs
@@ -189,4 +211,4 @@ jobs:
         echo "=== Backend Logs ==="
         cat app.log || echo "No app.log found"
         echo "=== Celery Logs ==="
-        cat celery_tasks.log || echo "No celery_tasks.log found" 
+        cat celery.log || echo "No celery.log found" 
