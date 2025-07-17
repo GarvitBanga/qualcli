@@ -50,35 +50,57 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
+        pip install -e .
         pip install -r requirements.txt
-        pip install -e .  # Install package in development mode
         npm install
 
+    - name: Initialize database
+      run: python scripts/init_db.py
+
     - name: Start backend services
-      env:
-        BROWSERSTACK_USERNAME: ${{ secrets.BROWSERSTACK_USERNAME }}
-        BROWSERSTACK_ACCESS_KEY: ${{ secrets.BROWSERSTACK_ACCESS_KEY }}
       run: |
-        # Initialize database
-        python scripts/init_db.py
-        
         # Start FastAPI server
         uvicorn backend.main:app --host 0.0.0.0 --port 8002 &
-        sleep 5  # Wait for server to start
+        sleep 5
         
         # Start Celery worker
         celery -A backend.queue.celery_app worker -l info &
-        sleep 5  # Wait for worker to start
+        sleep 5
 
-    - name: Run tests
+    - name: Submit and monitor test job
       env:
         BROWSERSTACK_USERNAME: ${{ secrets.BROWSERSTACK_USERNAME }}
         BROWSERSTACK_ACCESS_KEY: ${{ secrets.BROWSERSTACK_ACCESS_KEY }}
       run: |
-        # Submit test job through CLI
-        python -m cli.main submit \
+        # Submit the job and capture the job ID
+        JOB_ID=$(python -m cli.main submit \
           --org-id "browserstack-demo" \
           --app-version-id "wikipedia-v1.0" \
           --target browserstack \
           --priority 5 \
-          --test tests/appwright1.spec.js 
+          --test tests/appwright1.spec.js | grep -o 'Job [0-9]*' | cut -d' ' -f2)
+        
+        echo "Submitted job ID: $JOB_ID"
+        
+        # Poll for job completion
+        MAX_RETRIES=30  # 5 minutes timeout (10 second intervals)
+        RETRY_COUNT=0
+        
+        while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+          STATUS=$(python -m cli.main status --job-id $JOB_ID | grep -o 'Status: [a-zA-Z]*' | cut -d' ' -f2)
+          echo "Job $JOB_ID status: $STATUS"
+          
+          if [ "$STATUS" = "completed" ]; then
+            echo "✅ Job completed successfully!"
+            exit 0
+          elif [ "$STATUS" = "failed" ]; then
+            echo "❌ Job failed!"
+            exit 1
+          fi
+          
+          RETRY_COUNT=$((RETRY_COUNT + 1))
+          sleep 10
+        done
+        
+        echo "❌ Timeout waiting for job completion"
+        exit 1

@@ -1,0 +1,76 @@
+FROM ubuntu:22.04
+
+# Set environment variables
+ENV DEBIAN_FRONTEND=noninteractive
+ENV ANDROID_HOME=/opt/android-sdk
+ENV PATH=$PATH:$ANDROID_HOME/tools:$ANDROID_HOME/tools/bin:$ANDROID_HOME/platform-tools
+
+# Install basic dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    wget \
+    unzip \
+    git \
+    python3 \
+    python3-pip \
+    nodejs \
+    npm \
+    openjdk-8-jdk \
+    libqt5widgets5 \
+    xvfb \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Android SDK
+RUN mkdir -p $ANDROID_HOME && \
+    wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip -O android-sdk.zip && \
+    unzip -q android-sdk.zip -d $ANDROID_HOME && \
+    rm android-sdk.zip && \
+    mv $ANDROID_HOME/cmdline-tools $ANDROID_HOME/tools
+
+# Accept Android licenses and install necessary packages
+RUN yes | $ANDROID_HOME/tools/bin/sdkmanager --licenses && \
+    $ANDROID_HOME/tools/bin/sdkmanager "platform-tools" "platforms;android-29" "build-tools;29.0.3" \
+    "emulator" "system-images;android-29;google_apis;x86_64"
+
+# Create and configure AVD
+RUN echo "no" | $ANDROID_HOME/tools/bin/avdmanager create avd \
+    -n test_emulator \
+    -k "system-images;android-29;google_apis;x86_64" \
+    --force
+
+# Set up working directory
+WORKDIR /app
+
+# Copy requirements and install Python dependencies
+COPY requirements.txt .
+RUN pip3 install -r requirements.txt
+
+# Install AppWright
+COPY package.json package-lock.json ./
+RUN npm install
+
+# Copy application code
+COPY . .
+
+# Install the CLI package
+RUN pip3 install -e .
+
+# Create necessary directories
+RUN mkdir -p test-results/videos logs
+
+# Set up environment variables for AppWright execution
+ENV USE_REAL_APPWRIGHT_EXECUTION=true
+ENV DISPLAY=:99
+
+# Start script for containerized worker
+COPY docker/start-worker.sh /start-worker.sh
+RUN chmod +x /start-worker.sh
+
+# Expose ports for debugging
+EXPOSE 5555
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8002/health || exit 1
+
+CMD ["/start-worker.sh"] 
