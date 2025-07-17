@@ -128,7 +128,8 @@ async def get_grouped_jobs(app_version_id: str, db: Session = Depends(get_db)):
         {
             "job_id": job.id,
             "status": job.status,
-            "created_at": job.created_at
+            "created_at": job.created_at,
+            "priority": job.priority  # Add priority to response
         }
         for job in jobs
     ]
