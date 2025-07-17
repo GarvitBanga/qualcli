@@ -60,6 +60,27 @@ jobs:
     - name: Initialize device pool
       run: python scripts/init_devices.py
 
+    - name: Upload app to BrowserStack
+      run: |
+        RESPONSE=$(curl -u "$BROWSERSTACK_USERNAME:$BROWSERSTACK_ACCESS_KEY" \
+          -X POST "https://api-cloud.browserstack.com/app-automate/upload" \
+          -F "file=@builds/wikipedia.apk")
+        
+        # Extract the app URL from response
+        APP_URL=$(echo $RESPONSE | jq -r '.app_url')
+        echo "BROWSERSTACK_APP_URL=$APP_URL" >> $GITHUB_ENV
+        
+        if [ -z "$APP_URL" ]; then
+          echo "Failed to upload app to BrowserStack"
+          echo "Response: $RESPONSE"
+          exit 1
+        fi
+        
+        echo "Successfully uploaded app to BrowserStack: $APP_URL"
+      env:
+        BROWSERSTACK_USERNAME: ${{ secrets.BROWSERSTACK_USERNAME }}
+        BROWSERSTACK_ACCESS_KEY: ${{ secrets.BROWSERSTACK_ACCESS_KEY }}
+
     - name: Start backend services
       run: |
         # Start FastAPI server
