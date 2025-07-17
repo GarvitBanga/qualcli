@@ -57,6 +57,9 @@ jobs:
     - name: Initialize database
       run: python scripts/init_db.py
 
+    - name: Initialize device pool
+      run: python scripts/init_devices.py
+
     - name: Start backend services
       run: |
         # Start FastAPI server
