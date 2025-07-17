@@ -96,19 +96,34 @@ jobs:
         BROWSERSTACK_USERNAME: ${{ secrets.BROWSERSTACK_USERNAME }}
         BROWSERSTACK_ACCESS_KEY: ${{ secrets.BROWSERSTACK_ACCESS_KEY }}
         BROWSERSTACK_APP_URL: ${{ env.BROWSERSTACK_APP_URL }}
-        # Enable BrowserStack video recording and debugging capabilities
         BROWSERSTACK_VIDEO: "true"
         BROWSERSTACK_NETWORK_LOGS: "true"
         BROWSERSTACK_CONSOLE: "verbose"
         BROWSERSTACK_DEBUG: "true"
+        # Enable debug logging
+        APPWRIGHT_DEBUG: "true"
+        DEBUG: "appwright:*"
       run: |
+        # Enable debug logging for celery
+        echo "DEBUG=true" >> .env
+        echo "CELERY_LOG_LEVEL=DEBUG" >> .env
+        
+        # Check BrowserStack app status
+        echo "Checking BrowserStack app status..."
+        curl -u "$BROWSERSTACK_USERNAME:$BROWSERSTACK_ACCESS_KEY" \
+          -X GET "https://api-cloud.browserstack.com/app-automate/recent_apps" | jq '.'
+        
         # Submit the job and get the job ID
+        echo "Submitting test job..."
         OUTPUT=$(python -m cli.main submit \
           --org-id "browserstack-demo" \
           --app-version-id "wikipedia-v1.0" \
           --target browserstack \
           --priority 5 \
           --test tests/appwright1.spec.js)
+        
+        echo "Full submission output:"
+        echo "$OUTPUT"
         
         # Extract job ID and check if it was captured
         JOB_ID=$(echo "$OUTPUT" | grep -o '[0-9]\+' | head -n1)
@@ -120,26 +135,45 @@ jobs:
         
         echo "Submitted job ID: $JOB_ID"
         
-        # Poll for job completion
+        # Poll for job completion with enhanced logging
         MAX_RETRIES=30  # 5 minutes timeout (10 second intervals)
         RETRY_COUNT=0
         
         while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-          # Get job status
-          STATUS_OUTPUT=$(python -m cli.main status job --job-id $JOB_ID)
-          echo "Status output: $STATUS_OUTPUT"
+          # Get job status with verbose output
+          echo "Checking job status (attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)..."
+          STATUS_OUTPUT=$(python -m cli.main status job --job-id $JOB_ID --verbose)
+          echo "Status output:"
+          echo "$STATUS_OUTPUT"
+          
+          # Check celery logs
+          echo "Recent celery logs:"
+          tail -n 50 logs/celery.log
+          
+          # Check BrowserStack build status
+          echo "BrowserStack session status:"
+          curl -u "$BROWSERSTACK_USERNAME:$BROWSERSTACK_ACCESS_KEY" \
+            -X GET "https://api-cloud.browserstack.com/app-automate/builds.json" | jq '.'
           
           # Extract status
           if echo "$STATUS_OUTPUT" | grep -q "completed"; then
             echo "✅ Job completed successfully!"
+            # Get final BrowserStack session details
+            echo "Final BrowserStack session details:"
+            curl -u "$BROWSERSTACK_USERNAME:$BROWSERSTACK_ACCESS_KEY" \
+              -X GET "https://api-cloud.browserstack.com/app-automate/builds.json" | jq '.'
             exit 0
           elif echo "$STATUS_OUTPUT" | grep -q "failed"; then
             echo "❌ Job failed!"
+            # Get error details from BrowserStack
+            echo "BrowserStack session error details:"
+            curl -u "$BROWSERSTACK_USERNAME:$BROWSERSTACK_ACCESS_KEY" \
+              -X GET "https://api-cloud.browserstack.com/app-automate/builds.json" | jq '.'
             exit 1
           fi
           
           RETRY_COUNT=$((RETRY_COUNT + 1))
-          echo "Waiting for job completion (attempt $RETRY_COUNT/$MAX_RETRIES)..."
+          echo "Waiting for job completion..."
           sleep 10
         done
         
