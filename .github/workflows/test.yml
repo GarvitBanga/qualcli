@@ -95,6 +95,12 @@ jobs:
       env:
         BROWSERSTACK_USERNAME: ${{ secrets.BROWSERSTACK_USERNAME }}
         BROWSERSTACK_ACCESS_KEY: ${{ secrets.BROWSERSTACK_ACCESS_KEY }}
+        BROWSERSTACK_APP_URL: ${{ env.BROWSERSTACK_APP_URL }}
+        # Enable BrowserStack video recording and debugging capabilities
+        BROWSERSTACK_VIDEO: "true"
+        BROWSERSTACK_NETWORK_LOGS: "true"
+        BROWSERSTACK_CONSOLE: "verbose"
+        BROWSERSTACK_DEBUG: "true"
       run: |
         # Submit the job and get the job ID
         OUTPUT=$(python -m cli.main submit \
