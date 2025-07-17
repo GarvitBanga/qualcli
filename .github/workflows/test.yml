@@ -72,13 +72,21 @@ jobs:
         BROWSERSTACK_USERNAME: ${{ secrets.BROWSERSTACK_USERNAME }}
         BROWSERSTACK_ACCESS_KEY: ${{ secrets.BROWSERSTACK_ACCESS_KEY }}
       run: |
-        # Submit the job and capture the job ID
-        JOB_ID=$(python -m cli.main submit \
+        # Submit the job and get the job ID
+        OUTPUT=$(python -m cli.main submit \
           --org-id "browserstack-demo" \
           --app-version-id "wikipedia-v1.0" \
           --target browserstack \
           --priority 5 \
-          --test tests/appwright1.spec.js | grep -o 'Job [0-9]*' | cut -d' ' -f2)
+          --test tests/appwright1.spec.js)
+        
+        # Extract job ID and check if it was captured
+        JOB_ID=$(echo "$OUTPUT" | grep -o '[0-9]\+' | head -n1)
+        if [ -z "$JOB_ID" ]; then
+          echo "❌ Failed to get job ID from output:"
+          echo "$OUTPUT"
+          exit 1
+        fi
         
         echo "Submitted job ID: $JOB_ID"
         
@@ -87,18 +95,21 @@ jobs:
         RETRY_COUNT=0
         
         while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-          STATUS=$(python -m cli.main status --job-id $JOB_ID | grep -o 'Status: [a-zA-Z]*' | cut -d' ' -f2)
-          echo "Job $JOB_ID status: $STATUS"
+          # Get job status
+          STATUS_OUTPUT=$(python -m cli.main status job --job-id $JOB_ID)
+          echo "Status output: $STATUS_OUTPUT"
           
-          if [ "$STATUS" = "completed" ]; then
+          # Extract status
+          if echo "$STATUS_OUTPUT" | grep -q "completed"; then
             echo "✅ Job completed successfully!"
             exit 0
-          elif [ "$STATUS" = "failed" ]; then
+          elif echo "$STATUS_OUTPUT" | grep -q "failed"; then
             echo "❌ Job failed!"
             exit 1
           fi
           
           RETRY_COUNT=$((RETRY_COUNT + 1))
+          echo "Waiting for job completion (attempt $RETRY_COUNT/$MAX_RETRIES)..."
           sleep 10
         done
         
